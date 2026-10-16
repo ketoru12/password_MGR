@@ -1,0 +1,13 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+    // 暗号化の設定（salt など）。上書きされると全データが復号不能になるため、作成のみ許可
+    match /users/{uid} {
+      allow read, create: if request.auth != null && request.auth.uid == uid;
+    }
+    // 暗号化済みのパスワード項目。本人のみ読み書き可
+    match /users/{uid}/items/{itemId} {
+      allow read, write: if request.auth != null && request.auth.uid == uid;
+    }
+  }
+}

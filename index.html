@@ -1,0 +1,191 @@
+<!doctype html>
+<html lang="ja">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' https://www.gstatic.com https://apis.google.com; connect-src 'self' https://*.googleapis.com https://*.firebaseio.com wss://*.firebaseio.com; frame-src https://*.firebaseapp.com; style-src 'self' 'unsafe-inline'; img-src 'self' data:; base-uri 'none'; object-src 'none'">
+<meta name="referrer" content="no-referrer">
+<meta name="theme-color" content="#1f6feb">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-title" content="パスワード">
+<link rel="manifest" href="manifest.json">
+<link rel="icon" href="icon.svg" type="image/svg+xml">
+<link rel="apple-touch-icon" href="icon-180.png">
+<title>パスワード管理</title>
+<style>
+  :root {
+    --bg: #f5f6f8; --card: #fff; --text: #1b1f24; --muted: #667085; --line: #e3e6ea;
+    --primary: #1f6feb; --primary-text: #fff; --danger: #d92d20; --input: #fff;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --bg: #0f1115; --card: #1a1d23; --text: #e8eaed; --muted: #9aa0a6; --line: #2c3038;
+      --primary: #4c8dff; --primary-text: #0b1020; --danger: #ff6b5e; --input: #12151a;
+    }
+  }
+  * { box-sizing: border-box; }
+  [hidden] { display: none !important; }
+  html, body { margin: 0; background: var(--bg); color: var(--text);
+    font-family: system-ui, -apple-system, "Segoe UI", "Hiragino Sans", "Yu Gothic UI", sans-serif; }
+  body { padding: env(safe-area-inset-top) 0 env(safe-area-inset-bottom); }
+  main { max-width: 720px; margin: 0 auto; padding: 16px; }
+  h1 { font-size: 1.3rem; margin: 8px 0 16px; }
+  h2 { font-size: 1.15rem; margin: 0 0 12px; }
+  p { line-height: 1.6; }
+  .muted { color: var(--muted); font-size: .9rem; }
+  .card { background: var(--card); border: 1px solid var(--line); border-radius: 12px; padding: 20px; }
+  .center { max-width: 400px; margin: 10vh auto 0; }
+  label { display: block; font-size: .85rem; color: var(--muted); margin: 12px 0 4px; }
+  input, textarea {
+    width: 100%; font: inherit; font-size: 16px; color: var(--text); background: var(--input);
+    border: 1px solid var(--line); border-radius: 8px; padding: 10px 12px;
+  }
+  textarea { min-height: 72px; resize: vertical; }
+  input:focus, textarea:focus { outline: 2px solid var(--primary); outline-offset: -1px; }
+  button {
+    font: inherit; font-size: .9rem; border: 1px solid var(--line); background: var(--card); color: var(--text);
+    border-radius: 8px; padding: 8px 12px; cursor: pointer; white-space: nowrap;
+  }
+  button:active { transform: scale(.97); }
+  button:disabled { opacity: .6; cursor: default; }
+  button.primary { background: var(--primary); border-color: var(--primary); color: var(--primary-text); font-weight: 600; }
+  button.danger { color: var(--danger); }
+  button.link { border: none; background: none; color: var(--muted); padding: 4px; }
+  .block { width: 100%; margin-top: 16px; padding: 12px; }
+  .error { color: var(--danger); font-size: .9rem; min-height: 1.2em; margin: 8px 0 0; }
+  .warn { background: color-mix(in srgb, var(--danger) 12%, transparent); border-radius: 8px; padding: 10px 12px; font-size: .88rem; }
+
+  .topbar { position: sticky; top: 0; z-index: 5; background: var(--bg); padding: 8px 0 12px;
+    display: flex; gap: 8px; align-items: center; }
+  .topbar input { flex: 1; }
+  #list { list-style: none; margin: 0; padding: 0; display: grid; gap: 8px; }
+  .item { background: var(--card); border: 1px solid var(--line); border-radius: 12px; padding: 12px; }
+  .item-head { display: flex; gap: 8px; align-items: center; }
+  .item-title { flex: 1; min-width: 0; cursor: pointer; }
+  .item-title .site { display: block; font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .item-title .user { display: block; font-size: .85rem; color: var(--muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .actions { display: flex; gap: 6px; }
+  .item-body { margin-top: 12px; padding-top: 12px; border-top: 1px solid var(--line); display: grid; gap: 8px; }
+  .row { display: flex; gap: 8px; align-items: baseline; font-size: .9rem; }
+  .row .label { flex: 0 0 72px; color: var(--muted); font-size: .8rem; }
+  .row code { flex: 1; word-break: break-all; font-family: ui-monospace, Consolas, monospace; }
+  .row a { color: var(--primary); word-break: break-all; }
+  .row .memo { flex: 1; margin: 0; white-space: pre-wrap; word-break: break-word; }
+  #empty { text-align: center; margin-top: 48px; }
+
+  dialog { width: min(520px, calc(100vw - 32px)); border: 1px solid var(--line); border-radius: 14px;
+    background: var(--card); color: var(--text); padding: 20px; }
+  dialog::backdrop { background: rgba(0,0,0,.45); }
+  .pw-field { display: flex; gap: 6px; }
+  .pw-field input { flex: 1; font-family: ui-monospace, Consolas, monospace; }
+  .dlg-buttons { display: flex; gap: 8px; margin-top: 20px; }
+  .dlg-buttons .spacer { flex: 1; }
+
+  #toast { position: fixed; left: 50%; bottom: calc(24px + env(safe-area-inset-bottom)); transform: translateX(-50%);
+    background: #222; color: #fff; padding: 10px 16px; border-radius: 999px; font-size: .9rem;
+    opacity: 0; pointer-events: none; transition: opacity .2s; max-width: calc(100vw - 32px); text-align: center; }
+  #toast.show { opacity: .95; }
+</style>
+</head>
+<body>
+<main>
+  <!-- 設定未完了 -->
+  <section id="v-config" hidden>
+    <div class="card center">
+      <h2>初期設定が必要です</h2>
+      <p class="muted"><code>firebase-config.js</code> に Firebase の設定値を書き込んでください。手順は README.md を参照してください。</p>
+    </div>
+  </section>
+
+  <!-- ログイン -->
+  <section id="v-login" hidden>
+    <form id="f-login" class="card center" autocomplete="on">
+      <h2>🔐 パスワード管理</h2>
+      <label for="login-email">メールアドレス</label>
+      <input id="login-email" type="email" autocomplete="username" required>
+      <label for="login-pass">ログインパスワード</label>
+      <input id="login-pass" type="password" autocomplete="current-password" required>
+      <p class="error" id="login-error"></p>
+      <button class="primary block" type="submit">ログイン</button>
+    </form>
+  </section>
+
+  <!-- マスターパスワード（初回設定 / ロック解除） -->
+  <section id="v-unlock" hidden>
+    <form id="f-unlock" class="card center" autocomplete="off">
+      <h2 id="unlock-title">ロック解除</h2>
+      <p class="muted" id="unlock-desc">マスターパスワードを入力してください。</p>
+      <p class="warn" id="unlock-warn" hidden>マスターパスワードはどこにも保存されません。<strong>忘れるとデータは二度と復元できません。</strong>後から変更もできないので、確実に覚えられるものにしてください（8文字以上）。</p>
+      <label for="master">マスターパスワード</label>
+      <input id="master" type="password" autocomplete="off" required>
+      <div id="confirm-wrap" hidden>
+        <label for="master2">マスターパスワード（確認）</label>
+        <input id="master2" type="password" autocomplete="off">
+      </div>
+      <p class="error" id="unlock-error"></p>
+      <button class="primary block" type="submit" id="unlock-btn">解除</button>
+      <p style="text-align:center;margin:12px 0 0"><button type="button" class="link btn-logout">ログアウト</button></p>
+    </form>
+  </section>
+
+  <!-- メイン -->
+  <section id="v-main" hidden>
+    <div class="topbar">
+      <input id="search" type="search" placeholder="検索" autocomplete="off">
+      <button class="primary" id="btn-add" title="追加">＋ 追加</button>
+      <button id="btn-lock" title="ロック">🔒</button>
+    </div>
+    <ul id="list"></ul>
+    <p id="empty" class="muted" hidden></p>
+    <p style="text-align:center;margin-top:32px"><button type="button" class="link btn-logout">ログアウト</button></p>
+  </section>
+</main>
+
+<dialog id="dlg-edit">
+  <form id="f-edit" autocomplete="off">
+    <h2 id="edit-title">追加</h2>
+    <label for="e-site">サイト名 *</label>
+    <input id="e-site" required>
+    <label for="e-url">URL</label>
+    <input id="e-url" type="text" inputmode="url" placeholder="https://">
+    <label for="e-user">ID / メールアドレス</label>
+    <input id="e-user" autocomplete="off">
+    <label for="e-pass">パスワード</label>
+    <div class="pw-field">
+      <input id="e-pass" type="password" autocomplete="new-password">
+      <button type="button" id="e-toggle" title="表示切替">👁</button>
+      <button type="button" id="e-gen" title="自動生成">生成</button>
+    </div>
+    <label for="e-memo">メモ</label>
+    <textarea id="e-memo"></textarea>
+    <div class="dlg-buttons">
+      <button type="button" class="danger" id="e-delete">削除</button>
+      <span class="spacer"></span>
+      <button type="button" id="e-cancel">キャンセル</button>
+      <button type="submit" class="primary" id="e-save">保存</button>
+    </div>
+  </form>
+</dialog>
+
+<template id="tpl-item">
+  <li class="item">
+    <div class="item-head">
+      <div class="item-title"><span class="site"></span><span class="user"></span></div>
+      <div class="actions">
+        <button class="btn-copy-user" title="IDをコピー">ID</button>
+        <button class="btn-copy-pw primary" title="パスワードをコピー">PW</button>
+      </div>
+    </div>
+    <div class="item-body" hidden>
+      <div class="row"><span class="label">パスワード</span><code class="pw">••••••••</code><button class="btn-show">表示</button></div>
+      <div class="row url-row"><span class="label">URL</span><a class="url" target="_blank" rel="noopener noreferrer"></a></div>
+      <div class="row memo-row"><span class="label">メモ</span><p class="memo"></p></div>
+      <div><button class="btn-edit">編集</button></div>
+    </div>
+  </li>
+</template>
+
+<div id="toast" role="status" aria-live="polite"></div>
+<script type="module" src="app.js"></script>
+</body>
+</html>
