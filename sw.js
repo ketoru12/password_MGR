@@ -1,5 +1,5 @@
 // アプリ本体をキャッシュしてオフラインでも起動できるようにする（常にネットワーク優先）
-const CACHE = "pw-v1";
+const CACHE = "pw-v3";
 const ASSETS = ["./", "./index.html", "./app.js", "./firebase-config.js", "./manifest.json", "./icon.svg"];
 
 self.addEventListener("install", (e) => {

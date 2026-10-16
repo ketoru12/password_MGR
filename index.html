@@ -58,6 +58,15 @@
   .topbar { position: sticky; top: 0; z-index: 5; background: var(--bg); padding: 8px 0 12px;
     display: flex; gap: 8px; align-items: center; }
   .topbar input { flex: 1; }
+  #cats { display: flex; gap: 6px; overflow-x: auto; padding: 0 0 12px; scrollbar-width: none; }
+  #cats::-webkit-scrollbar { display: none; }
+  #cats button { border-radius: 999px; padding: 6px 12px; flex: 0 0 auto;
+    -webkit-user-select: none; user-select: none; -webkit-touch-callout: none; }
+  #cats .add-cat { border-style: dashed; color: var(--muted); }
+  #cats button[aria-pressed="true"] { background: var(--primary); border-color: var(--primary); color: var(--primary-text); }
+  #cats .count { opacity: .7; margin-left: 4px; font-size: .8em; }
+  .item-title .cat { display: inline-block; font-size: .7rem; color: var(--muted); border: 1px solid var(--line);
+    border-radius: 999px; padding: 0 6px; margin-left: 6px; vertical-align: middle; font-weight: 400; }
   #list { list-style: none; margin: 0; padding: 0; display: grid; gap: 8px; }
   .item { background: var(--card); border: 1px solid var(--line); border-radius: 12px; padding: 12px; }
   .item-head { display: flex; gap: 8px; align-items: center; }
@@ -135,6 +144,7 @@
       <button class="primary" id="btn-add" title="追加">＋ 追加</button>
       <button id="btn-lock" title="ロック">🔒</button>
     </div>
+    <nav id="cats" aria-label="カテゴリー"></nav>
     <ul id="list"></ul>
     <p id="empty" class="muted" hidden></p>
     <p style="text-align:center;margin-top:32px"><button type="button" class="link btn-logout">ログアウト</button></p>
@@ -146,6 +156,9 @@
     <h2 id="edit-title">追加</h2>
     <label for="e-site">サイト名 *</label>
     <input id="e-site" required>
+    <label for="e-cat">カテゴリー</label>
+    <input id="e-cat" list="cat-options" placeholder="例: 仕事、買い物、SNS（空欄なら未分類）" autocomplete="off">
+    <datalist id="cat-options"></datalist>
     <label for="e-url">URL</label>
     <input id="e-url" type="text" inputmode="url" placeholder="https://">
     <label for="e-user">ID / メールアドレス</label>
@@ -167,10 +180,26 @@
   </form>
 </dialog>
 
+<dialog id="dlg-cat">
+  <form id="f-cat" autocomplete="off">
+    <h2 id="cat-title">カテゴリーを追加</h2>
+    <p class="muted" id="cat-info"></p>
+    <label for="cat-name">カテゴリー名</label>
+    <input id="cat-name" required>
+    <p class="error" id="cat-error"></p>
+    <div class="dlg-buttons">
+      <button type="button" class="danger" id="cat-delete">削除</button>
+      <span class="spacer"></span>
+      <button type="button" id="cat-cancel">キャンセル</button>
+      <button type="submit" class="primary" id="cat-save">追加</button>
+    </div>
+  </form>
+</dialog>
+
 <template id="tpl-item">
   <li class="item">
     <div class="item-head">
-      <div class="item-title"><span class="site"></span><span class="user"></span></div>
+      <div class="item-title"><span class="site"><span class="site-name"></span><span class="cat" hidden></span></span><span class="user"></span></div>
       <div class="actions">
         <button class="btn-copy-user" title="IDをコピー">ID</button>
         <button class="btn-copy-pw primary" title="パスワードをコピー">PW</button>

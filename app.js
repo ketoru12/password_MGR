@@ -3,7 +3,7 @@ import { getAuth, onAuthStateChanged, signInWithEmailAndPassword, signOut }
   from "https://www.gstatic.com/firebasejs/10.12.2/firebase-auth.js";
 import {
   initializeFirestore, persistentLocalCache, persistentMultipleTabManager,
-  doc, getDoc, getDocFromServer, setDoc, addDoc, deleteDoc, collection, onSnapshot, serverTimestamp,
+  doc, getDoc, getDocFromServer, setDoc, deleteDoc, collection, onSnapshot, serverTimestamp, writeBatch,
 } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore.js";
 import { firebaseConfig } from "./firebase-config.js";
 
@@ -12,6 +12,8 @@ const PBKDF2_ITER = 600000;          // 鍵導出の反復回数（OWASP 推奨�
 const IDLE_LOCK_MS = 5 * 60 * 1000;  // 無操作で自動ロックするまでの時間
 const HIDDEN_LOCK_MS = 60 * 1000;    // バックグラウンドに回ってから自動ロックするまでの時間
 const CLIPBOARD_CLEAR_MS = 30 * 1000;
+const CAT_DOC = "_categories";       // items コレクション内の、カテゴリー一覧を保存する特別なドキュメント
+const RESERVED_CATS = ["すべて", "未分類"];
 
 const $ = (s, root = document) => root.querySelector(s);
 
@@ -58,7 +60,9 @@ let user = null;
 let key = null;        // 復号鍵（メモリ上のみ）
 let meta = null;       // users/{uid} ドキュメント（salt と検証用データ）
 let items = [];
+let storedCats = [];   // 明示的に登録されたカテゴリー（空のものも含む）
 let unsubscribe = null;
+let currentCat = null; // null = すべて, "" = 未分類, それ以外 = カテゴリー名
 
 function show(view) {
   for (const v of ["config", "login", "unlock", "main"]) $("#v-" + v).hidden = v !== view;
@@ -201,15 +205,19 @@ function startMain() {
   $("#search").value = "";
   render();
   const myKey = key;
-  unsubscribe = onSnapshot(collection(db, "users", user.uid, "items"), async (snap) => {
-    const list = await Promise.all(snap.docs.map(async (d) => {
+  unsubscribe = onSnapshot(itemsCol(), async (snap) => {
+    let cats = [];
+    const list = (await Promise.all(snap.docs.map(async (d) => {
       try {
-        return { id: d.id, ...(await decryptJSON(myKey, d.data())) };
+        const data = await decryptJSON(myKey, d.data());
+        if (d.id === CAT_DOC) { cats = data.names || []; return null; }
+        return { id: d.id, ...data };
       } catch {
-        return { id: d.id, site: "（復号できないデータ）", broken: true };
+        return d.id === CAT_DOC ? null : { id: d.id, site: "（復号できないデータ）", broken: true };
       }
-    }));
+    }))).filter(Boolean);
     if (key !== myKey) return; // 復号中にロックされた
+    storedCats = cats;
     items = list.sort((a, b) => (a.site || "").localeCompare(b.site || "", "ja"));
     render();
   }, (ex) => toast("同期エラー: " + ex.code));
@@ -219,10 +227,11 @@ function startMain() {
 function lock(showUnlock = true) {
   key = null;
   items = [];
+  storedCats = [];
   if (unsubscribe) unsubscribe();
   unsubscribe = null;
   clearTimeout(idleTimer);
-  if ($("#dlg-edit").open) $("#dlg-edit").close();
+  for (const d of document.querySelectorAll("dialog[open]")) d.close();
   $("#list").replaceChildren();
   if (showUnlock && user && meta) {
     setUnlockMode(false);
@@ -245,15 +254,104 @@ function safeUrl(raw) {
   }
 }
 
+const itemsCol = () => collection(db, "users", user.uid, "items");
+const sortJa = (arr) => arr.sort((a, b) => a.localeCompare(b, "ja"));
+
+// 登録済みカテゴリー＋項目に付いているカテゴリー
+function categoryList() {
+  return sortJa([...new Set([...storedCats, ...items.map((it) => it.category || "")].filter(Boolean))]);
+}
+
+// 一括書き込み用：項目を暗号化してバッチに追加（id なしなら新規）
+async function queueItem(batch, { id, broken, ...data }) {
+  const ref = id ? doc(itemsCol(), id) : doc(itemsCol());
+  batch.set(ref, { ...(await encryptJSON(key, data)), updatedAt: serverTimestamp() });
+}
+
+async function queueCats(batch, names) {
+  const list = sortJa([...new Set(names.filter(Boolean))]);
+  batch.set(doc(itemsCol(), CAT_DOC), { ...(await encryptJSON(key, { names: list })), updatedAt: serverTimestamp() });
+}
+
+// オフラインでも書き込みは端末に反映され、接続時に同期されるので完了を待たない
+function commit(batch, what) {
+  batch.commit().catch((ex) => toast(`${what}に失敗しました: ${ex.code}`));
+}
+
+function validateCatName(name) {
+  if (!name) return "名前を入力してください";
+  if (RESERVED_CATS.includes(name)) return `「${name}」は使えません`;
+  return "";
+}
+
+// 長押し（スマホ）・右クリック（PC）で編集画面を開く
+function attachCatManage(btn, name) {
+  let timer;
+  let opened = false;
+  const open = () => { opened = true; if (!$("#dlg-cat").open) openCatDialog(name); };
+  btn.addEventListener("pointerdown", () => { opened = false; timer = setTimeout(open, 550); });
+  for (const ev of ["pointerup", "pointerleave", "pointercancel"]) btn.addEventListener(ev, () => clearTimeout(timer));
+  btn.addEventListener("contextmenu", (e) => { e.preventDefault(); clearTimeout(timer); open(); });
+  // 長押しで開いた直後の click で絞り込みが切り替わらないようにする
+  btn.addEventListener("click", (e) => { if (opened) { opened = false; e.stopImmediatePropagation(); } }, { capture: true });
+}
+
+function renderCategories() {
+  const names = categoryList();
+  const hasNone = items.some((it) => !it.category);
+  // 選択中のカテゴリーが無くなったら「すべて」に戻す
+  if (currentCat !== null && !(currentCat === "" ? hasNone : names.includes(currentCat))) currentCat = null;
+
+  const chip = (label, value, count) => {
+    const b = document.createElement("button");
+    b.type = "button";
+    b.textContent = label;
+    const c = document.createElement("span");
+    c.className = "count";
+    c.textContent = count;
+    b.append(c);
+    b.setAttribute("aria-pressed", String(currentCat === value));
+    b.addEventListener("click", () => {
+      // 選択中のカテゴリーをもう一度押すと編集画面
+      if (value && currentCat === value) return openCatDialog(value);
+      currentCat = value;
+      render();
+    });
+    if (value) {
+      b.title = "もう一度押す・長押し・右クリックで名前の変更／削除";
+      attachCatManage(b, value);
+    }
+    return b;
+  };
+  const chips = [chip("すべて", null, items.length)];
+  for (const n of names) chips.push(chip(n, n, items.filter((it) => it.category === n).length));
+  if (hasNone && names.length) chips.push(chip("未分類", "", items.filter((it) => !it.category).length));
+  const add = document.createElement("button");
+  add.type = "button";
+  add.className = "add-cat";
+  add.textContent = "＋ カテゴリー";
+  add.addEventListener("click", () => openCatDialog(null));
+  chips.push(add);
+  $("#cats").replaceChildren(...chips);
+
+  $("#cat-options").replaceChildren(...names.map((n) => Object.assign(document.createElement("option"), { value: n })));
+}
+
 function render() {
+  renderCategories();
   const q = $("#search").value.trim().toLowerCase();
-  const shown = q
-    ? items.filter((it) => [it.site, it.username, it.url, it.memo].some((v) => (v || "").toLowerCase().includes(q)))
-    : items;
+  const shown = items.filter((it) =>
+    (currentCat === null || (it.category || "") === currentCat) &&
+    (!q || [it.site, it.username, it.url, it.memo, it.category].some((v) => (v || "").toLowerCase().includes(q))));
   const tpl = $("#tpl-item");
   $("#list").replaceChildren(...shown.map((it) => {
     const li = tpl.content.firstElementChild.cloneNode(true);
-    $(".site", li).textContent = it.site || "(名称なし)";
+    $(".site-name", li).textContent = it.site || "(名称なし)";
+    if (it.category && currentCat === null) {
+      const cat = $(".cat", li);
+      cat.textContent = it.category;
+      cat.hidden = false;
+    }
     $(".user", li).textContent = it.username || "";
     const body = $(".item-body", li);
     $(".item-title", li).addEventListener("click", () => { body.hidden = !body.hidden; });
@@ -287,7 +385,7 @@ function render() {
   }));
   const empty = $("#empty");
   empty.hidden = shown.length > 0;
-  empty.textContent = items.length ? "該当するものがありません" : "まだ登録がありません。「＋ 追加」から登録してください。";
+  empty.textContent = items.length ? (q ? "該当するものがありません" : "このカテゴリーには登録がありません") : "まだ登録がありません。「＋ 追加」から登録してください。";
 }
 
 // ---- コピー ----
@@ -311,6 +409,7 @@ function openEdit(it = null) {
   editingId = it ? it.id : null;
   $("#edit-title").textContent = it ? "編集" : "追加";
   $("#e-site").value = it?.site || "";
+  $("#e-cat").value = it ? it.category || "" : currentCat || ""; // 新規は表示中のカテゴリーを初期値に
   $("#e-url").value = it?.url || "";
   $("#e-user").value = it?.username || "";
   $("#e-pass").value = it?.password || "";
@@ -337,8 +436,10 @@ $("#e-gen").addEventListener("click", () => {
 $("#f-edit").addEventListener("submit", async (e) => {
   e.preventDefault();
   if (!key) return;
+  const cat = $("#e-cat").value.trim();
   const data = {
     site: $("#e-site").value.trim(),
+    category: cat === "未分類" ? "" : cat,
     url: $("#e-url").value.trim(),
     username: $("#e-user").value.trim(),
     password: $("#e-pass").value,
@@ -347,11 +448,11 @@ $("#f-edit").addEventListener("submit", async (e) => {
   const save = $("#e-save");
   save.disabled = true;
   try {
-    const payload = { ...(await encryptJSON(key, data)), updatedAt: serverTimestamp() };
-    const col = collection(db, "users", user.uid, "items");
-    // オフラインでも書き込みはキャッシュされ、接続時に同期されるので完了を待たない
-    const pending = editingId ? setDoc(doc(col, editingId), payload) : addDoc(col, payload);
-    pending.catch((ex) => toast("保存に失敗しました: " + ex.code));
+    const batch = writeBatch(db);
+    await queueItem(batch, { id: editingId, ...data });
+    // 新しいカテゴリー名なら一覧にも登録（項目が0件になっても残るように）
+    if (data.category && !storedCats.includes(data.category)) await queueCats(batch, [...storedCats, data.category]);
+    commit(batch, "保存");
     dlg.close();
     toast("保存しました");
   } finally {
@@ -364,6 +465,72 @@ $("#e-delete").addEventListener("click", () => {
   deleteDoc(doc(db, "users", user.uid, "items", editingId)).catch((ex) => toast("削除に失敗しました: " + ex.code));
   dlg.close();
   toast("削除しました");
+});
+
+// ---- カテゴリーの追加・名前変更・削除 ----
+const dlgCat = $("#dlg-cat");
+let catEditing = null; // null = 新規追加
+
+function openCatDialog(name) {
+  catEditing = name;
+  const count = name ? items.filter((it) => it.category === name).length : 0;
+  $("#cat-title").textContent = name ? "カテゴリーの編集" : "カテゴリーを追加";
+  $("#cat-info").textContent = name ? `${count}件の項目が入っています。名前を変えると全項目に反映されます。` : "";
+  $("#cat-info").hidden = !name;
+  $("#cat-name").value = name || "";
+  $("#cat-error").textContent = "";
+  $("#cat-delete").hidden = !name;
+  $("#cat-save").textContent = name ? "名前を変更" : "追加";
+  dlgCat.showModal();
+  $("#cat-name").focus();
+}
+
+$("#cat-cancel").addEventListener("click", () => dlgCat.close());
+
+$("#f-cat").addEventListener("submit", async (e) => {
+  e.preventDefault();
+  if (!key) return;
+  const newName = $("#cat-name").value.trim();
+  const err = validateCatName(newName);
+  if (err) return ($("#cat-error").textContent = err);
+  const exists = categoryList().includes(newName);
+  const old = catEditing;
+
+  if (old === null) {
+    if (exists) return ($("#cat-error").textContent = "同じ名前のカテゴリーがあります");
+    const batch = writeBatch(db);
+    await queueCats(batch, [...storedCats, newName]);
+    commit(batch, "追加");
+    currentCat = newName;
+    toast(`「${newName}」を追加しました`);
+  } else {
+    if (newName === old) return dlgCat.close();
+    if (exists && !confirm(`「${newName}」は既にあります。「${old}」の項目を「${newName}」にまとめますか？`)) return;
+    const batch = writeBatch(db);
+    for (const it of items) if (it.category === old) await queueItem(batch, { ...it, category: newName });
+    await queueCats(batch, [...storedCats.filter((n) => n !== old), newName]);
+    commit(batch, "名前の変更");
+    if (currentCat === old) currentCat = newName;
+    toast(`「${old}」を「${newName}」に変更しました`);
+  }
+  dlgCat.close();
+});
+
+$("#cat-delete").addEventListener("click", async () => {
+  if (!key || !catEditing) return;
+  const name = catEditing;
+  const targets = items.filter((it) => it.category === name);
+  const msg = targets.length
+    ? `カテゴリー「${name}」を削除しますか？\n中の${targets.length}件は「未分類」に移ります（項目は消えません）。`
+    : `カテゴリー「${name}」を削除しますか？`;
+  if (!confirm(msg)) return;
+  const batch = writeBatch(db);
+  for (const it of targets) await queueItem(batch, { ...it, category: "" });
+  await queueCats(batch, storedCats.filter((n) => n !== name));
+  commit(batch, "削除");
+  if (currentCat === name) currentCat = null;
+  dlgCat.close();
+  toast(`「${name}」を削除しました`);
 });
 
 // ---- 自動ロック ----
