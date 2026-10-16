@@ -305,7 +305,10 @@ function renderCategories() {
   const chip = (label, value, count) => {
     const b = document.createElement("button");
     b.type = "button";
-    b.textContent = label;
+    const nameEl = document.createElement("span");
+    nameEl.className = "name";
+    nameEl.textContent = label;
+    b.append(nameEl);
     const c = document.createElement("span");
     c.className = "count";
     c.textContent = count;

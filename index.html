@@ -11,7 +11,7 @@
 <link rel="manifest" href="manifest.json">
 <link rel="icon" href="icon.svg" type="image/svg+xml">
 <link rel="apple-touch-icon" href="icon-180.png">
-<title>パスワード管理</title>
+<title>パスワード管理v2</title>
 <style>
   :root {
     --bg: #f5f6f8; --card: #fff; --text: #1b1f24; --muted: #667085; --line: #e3e6ea;
@@ -28,7 +28,7 @@
   html, body { margin: 0; background: var(--bg); color: var(--text);
     font-family: system-ui, -apple-system, "Segoe UI", "Hiragino Sans", "Yu Gothic UI", sans-serif; }
   body { padding: env(safe-area-inset-top) 0 env(safe-area-inset-bottom); }
-  main { max-width: 720px; margin: 0 auto; padding: 16px; }
+  main { max-width: 960px; margin: 0 auto; padding: 16px; }
   h1 { font-size: 1.3rem; margin: 8px 0 16px; }
   h2 { font-size: 1.15rem; margin: 0 0 12px; }
   p { line-height: 1.6; }
@@ -58,13 +58,27 @@
   .topbar { position: sticky; top: 0; z-index: 5; background: var(--bg); padding: 8px 0 12px;
     display: flex; gap: 8px; align-items: center; }
   .topbar input { flex: 1; }
-  #cats { display: flex; gap: 6px; overflow-x: auto; padding: 0 0 12px; scrollbar-width: none; }
-  #cats::-webkit-scrollbar { display: none; }
-  #cats button { border-radius: 999px; padding: 6px 12px; flex: 0 0 auto;
+  /* 左：カテゴリー ／ 右：一覧 */
+  .layout { display: grid; grid-template-columns: 200px minmax(0, 1fr); gap: 16px; align-items: start; }
+  #cats { position: sticky; top: 64px; max-height: calc(100vh - 80px); overflow-y: auto;
+    display: flex; flex-direction: column; gap: 2px; padding: 8px; background: var(--card);
+    border: 1px solid var(--line); border-radius: 12px; }
+  #cats button { display: flex; align-items: center; gap: 6px; width: 100%; text-align: left;
+    border: 1px solid transparent; background: transparent; padding: 9px 10px; white-space: normal;
     -webkit-user-select: none; user-select: none; -webkit-touch-callout: none; }
-  #cats .add-cat { border-style: dashed; color: var(--muted); }
-  #cats button[aria-pressed="true"] { background: var(--primary); border-color: var(--primary); color: var(--primary-text); }
-  #cats .count { opacity: .7; margin-left: 4px; font-size: .8em; }
+  #cats button:hover { background: color-mix(in srgb, var(--primary) 8%, transparent); }
+  #cats .name { flex: 1; min-width: 0; word-break: break-word; }
+  #cats .count { opacity: .7; font-size: .8em; }
+  #cats button[aria-pressed="true"] { background: var(--primary); color: var(--primary-text); font-weight: 600; }
+  #cats .add-cat { margin-top: 6px; border: 1px dashed var(--line); color: var(--muted); justify-content: center; }
+  @media (max-width: 600px) {
+    .layout { grid-template-columns: 100px minmax(0, 1fr); gap: 8px; }
+    #cats { padding: 4px; }
+    #cats button { font-size: .8rem; padding: 8px 6px; gap: 2px; }
+    #cats .add-cat { font-size: .75rem; }
+    .item { padding: 10px; }
+    .actions button { padding: 8px 10px; }
+  }
   .item-title .cat { display: inline-block; font-size: .7rem; color: var(--muted); border: 1px solid var(--line);
     border-radius: 999px; padding: 0 6px; margin-left: 6px; vertical-align: middle; font-weight: 400; }
   #list { list-style: none; margin: 0; padding: 0; display: grid; gap: 8px; }
@@ -109,7 +123,7 @@
   <!-- ログイン -->
   <section id="v-login" hidden>
     <form id="f-login" class="card center" autocomplete="on">
-      <h2>🔐 パスワード管理</h2>
+      <h2>🔐 パスワード管理v2</h2>
       <label for="login-email">メールアドレス</label>
       <input id="login-email" type="email" autocomplete="username" required>
       <label for="login-pass">ログインパスワード</label>
@@ -144,9 +158,13 @@
       <button class="primary" id="btn-add" title="追加">＋ 追加</button>
       <button id="btn-lock" title="ロック">🔒</button>
     </div>
-    <nav id="cats" aria-label="カテゴリー"></nav>
-    <ul id="list"></ul>
-    <p id="empty" class="muted" hidden></p>
+    <div class="layout">
+      <nav id="cats" aria-label="カテゴリー"></nav>
+      <div>
+        <ul id="list"></ul>
+        <p id="empty" class="muted" hidden></p>
+      </div>
+    </div>
     <p style="text-align:center;margin-top:32px"><button type="button" class="link btn-logout">ログアウト</button></p>
   </section>
 </main>
